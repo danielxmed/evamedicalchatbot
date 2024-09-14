@@ -1,6 +1,9 @@
 import streamlit as st
 from openai import OpenAI
 import json
+import os
+from pathlib import Path
+import pickle
 
 # Configuração da página do Streamlit
 st.set_page_config(page_title="Eva Medical Chatbot", page_icon="💊")
@@ -9,105 +12,131 @@ st.set_page_config(page_title="Eva Medical Chatbot", page_icon="💊")
 from prompt_sistema import prompt_do_sistema
 prompt_sistema = prompt_do_sistema
 
-# Título e descrição
-st.title("Eva Medical Chatbot 💊")
-st.markdown("""
-Eva é um chatbot médico que fornece diagnósticos e condutas sugeridas com base nos casos clínicos fornecidos.
-""")
+# Diretórios para salvar conversas e configurações
+PASTA_CONVERSAS = Path('conversas')
+PASTA_CONVERSAS.mkdir(exist_ok=True)
+PASTA_CONFIGURACOES = Path('configuracoes')
+PASTA_CONFIGURACOES.mkdir(exist_ok=True)
+
+# Funções utilitárias para salvar e carregar conversas
+def salvar_conversa(nome_conversa, mensagens):
+    with open(PASTA_CONVERSAS / f"{nome_conversa}.pkl", "wb") as f:
+        pickle.dump(mensagens, f)
+
+def carregar_conversa(nome_conversa):
+    with open(PASTA_CONVERSAS / f"{nome_conversa}.pkl", "rb") as f:
+        return pickle.load(f)
+
+def listar_conversas():
+    conversas = list(PASTA_CONVERSAS.glob("*.pkl"))
+    conversas = sorted(conversas, key=lambda x: x.stat().st_mtime, reverse=True)
+    return [c.stem for c in conversas]
 
 # Função principal para gerar a resposta do chatbot
 def gerar_resposta(cliente, messages):
     response = cliente.chat.completions.create(
-        model=modelo,
+        model=st.session_state.modelo,
         messages=messages,
         temperature=1.0,
     )
     return response
 
-# Inicializa a sessão do Streamlit
-if 'api_key' not in st.session_state:
-    st.session_state.api_key = ''
+# Inicialização da sessão do Streamlit
+def inicializacao():
+    if 'api_key' not in st.session_state:
+        st.session_state.api_key = ''
+    if 'cliente' not in st.session_state:
+        st.session_state.cliente = None
+    if 'modelo' not in st.session_state:
+        st.session_state.modelo = 'gpt-3.5-turbo'
+    if 'mensagens' not in st.session_state:
+        st.session_state.mensagens = []
+    if 'conversa_atual' not in st.session_state:
+        st.session_state.conversa_atual = ''
+    if 'prompt_sistema' not in st.session_state:
+        st.session_state.prompt_sistema = prompt_sistema
 
-if 'messages' not in st.session_state:
-    # Inclui o prompt do sistema nas mensagens
-    st.session_state.messages = [
-        {"role": "system", "content": prompt_sistema}
-    ]
+# Configurações na barra lateral
+def tab_configuracoes():
+    st.sidebar.header("Configurações")
+    modelo_escolhido = st.sidebar.selectbox('Selecione o modelo', ['gpt-3.5-turbo', 'gpt-4'])
+    st.session_state.modelo = modelo_escolhido
 
-if 'conversation_history' not in st.session_state:
-    st.session_state.conversation_history = []
+    api_key_input = st.sidebar.text_input(
+        "Insira sua chave da OpenAI API:",
+        type="password",
+        placeholder="sk-...",
+        help="Você pode obter sua chave de API em https://platform.openai.com/account/api-keys."
+    )
+    if api_key_input != st.session_state.api_key:
+        st.session_state.api_key = api_key_input
+        st.session_state.cliente = OpenAI(api_key=st.session_state.api_key)
+        st.sidebar.success('Chave da API atualizada com sucesso!')
 
-# Campo para inserção da chave da API
-st.sidebar.header("Configurações")
-api_key_input = st.sidebar.text_input(
-    "Insira sua chave da OpenAI API:",
-    type="password",
-    placeholder="sk-...",
-    help="Você pode obter sua chave de API em https://platform.openai.com/account/api-keys."
-)
+# Tab para gerenciar conversas
+def tab_conversas():
+    st.sidebar.markdown("## Conversas")
+    if st.sidebar.button('➕ Nova conversa', use_container_width=True):
+        st.session_state.mensagens = []
+        st.session_state.conversa_atual = ''
+        st.experimental_rerun()
 
-if api_key_input:
-    st.session_state.api_key = api_key_input
-    # Inicializa o cliente com a chave de API fornecida
-    cliente = OpenAI(api_key=st.session_state.api_key)
-    modelo = "gpt-4"
+    conversas = listar_conversas()
+    for nome_conversa in conversas:
+        if st.sidebar.button(nome_conversa, key=nome_conversa, use_container_width=True):
+            st.session_state.mensagens = carregar_conversa(nome_conversa)
+            st.session_state.conversa_atual = nome_conversa
+            st.experimental_rerun()
+
+# Página principal do chatbot
+def pagina_principal():
+    st.title("Eva Medical Chatbot 💊")
+    st.markdown("""
+    Eva é um chatbot médico que fornece diagnósticos e condutas sugeridas com base nos casos clínicos fornecidos.
+    """)
+    if not st.session_state.api_key:
+        st.warning("Por favor, insira sua chave da OpenAI API na aba de configurações.")
+        return
+    if st.session_state.mensagens == []:
+        # Inicia a conversa com o prompt do sistema
+        st.session_state.mensagens = [{"role": "system", "content": st.session_state.prompt_sistema}]
+    # Exibe o histórico de mensagens
+    for msg in st.session_state.mensagens[1:]:
+        if msg['role'] == 'user':
+            st.chat_message("user").markdown(msg['content'])
+        elif msg['role'] == 'assistant':
+            st.chat_message("assistant").markdown(msg['content'])
 
     # Campo de entrada do usuário
-    with st.form(key='chat_form', clear_on_submit=True):
-        user_input = st.text_area("Digite o caso clínico ou sua mensagem:", height=100)
-        submit_button = st.form_submit_button(label='Enviar')
-
-    if submit_button and user_input:
-        # Adiciona a mensagem do usuário ao histórico
-        st.session_state.messages.append({"role": "user", "content": user_input})
-        st.session_state.conversation_history.append({"role": "user", "content": user_input})
-
+    prompt = st.chat_input('Digite sua mensagem')
+    if prompt:
+        # Adiciona a mensagem do usuário
+        st.session_state.mensagens.append({"role": "user", "content": prompt})
+        st.chat_message("user").markdown(prompt)
         # Gera a resposta do chatbot
         try:
-            resposta = gerar_resposta(cliente, st.session_state.messages)
-
-            # Adiciona a resposta do assistente ao histórico
+            resposta = gerar_resposta(st.session_state.cliente, st.session_state.mensagens)
             assistant_message = resposta.choices[0].message.content
-            st.session_state.messages.append({"role": "assistant", "content": assistant_message})
-            st.session_state.conversation_history.append({"role": "assistant", "content": assistant_message})
-
-            # Exibe a resposta do assistente
-            st.markdown(f"**Eva:** {assistant_message}")
+            st.session_state.mensagens.append({"role": "assistant", "content": assistant_message})
+            st.chat_message("assistant").markdown(assistant_message)
+            # Salva a conversa
+            if st.session_state.conversa_atual:
+                nome_conversa = st.session_state.conversa_atual
+            else:
+                nome_conversa = prompt[:30].strip()
+            salvar_conversa(nome_conversa, st.session_state.mensagens)
+            st.session_state.conversa_atual = nome_conversa
         except Exception as e:
             st.error(f"Ocorreu um erro: {e}")
 
-    # Exibe o histórico de mensagens
-    if st.session_state.messages:
-        for msg in st.session_state.messages[1:]:
-            if msg['role'] == 'user':
-                st.markdown(f"**Você:** {msg['content']}")
-            elif msg['role'] == 'assistant':
-                st.markdown(f"**Eva:** {msg['content']}")
+# Main
+def main():
+    inicializacao()
+    tab_configuracoes()
+    tab_conversas()
+    pagina_principal()
 
-    # Botão para encerrar a conversa e salvar o histórico
-    if st.button('Encerrar Conversa'):
-        st.write("Conversa encerrada.")
-
-        # Remove o prompt do sistema do histórico ao salvar
-        conversation_history_without_system = [msg for msg in st.session_state.conversation_history if msg['role'] != 'system']
-
-        # Cria o objeto de dados para fine-tuning
-        data = {
-            "messages": conversation_history_without_system
-        }
-
-        # Salva no arquivo JSONL
-        with open("fine_tuning_data.jsonl", "a", encoding="utf-8") as f:
-            json_line = json.dumps(data, ensure_ascii=False)
-            f.write(json_line + "\n")
-
-        # Limpa o estado da sessão
-        st.session_state.messages = [
-            {"role": "system", "content": prompt_sistema}
-        ]
-        st.session_state.conversation_history = []
-        st.experimental_rerun()
-else:
-    st.warning("Por favor, insira sua chave da OpenAI API na barra lateral.")
+if __name__ == '__main__':
+    main()
 
 
