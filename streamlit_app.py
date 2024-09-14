@@ -77,16 +77,16 @@ def tab_configuracoes():
 def tab_conversas():
     st.sidebar.markdown("## Conversas")
     if st.sidebar.button('➕ Nova conversa', use_container_width=True):
-        st.session_state.mensagens = []
+        st.session_state.mensagens = [{"role": "system", "content": st.session_state.prompt_sistema}]
         st.session_state.conversa_atual = ''
-        st.experimental_rerun()
+        # Não chamamos st.experimental_rerun()
 
     conversas = listar_conversas()
     for nome_conversa in conversas:
         if st.sidebar.button(nome_conversa, key=nome_conversa, use_container_width=True):
             st.session_state.mensagens = carregar_conversa(nome_conversa)
             st.session_state.conversa_atual = nome_conversa
-            st.experimental_rerun()
+            # Não chamamos st.experimental_rerun()
 
 # Página principal do chatbot
 def pagina_principal():
