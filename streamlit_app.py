@@ -17,6 +17,7 @@ PASTA_CONVERSAS = Path('conversas')
 PASTA_CONVERSAS.mkdir(exist_ok=True)
 PASTA_CONFIGURACOES = Path('configuracoes')
 PASTA_CONFIGURACOES.mkdir(exist_ok=True)
+ARQUIVO_JSONL = Path('fine_tuning_data.jsonl')
 
 # Funções utilitárias para salvar e carregar conversas
 def salvar_conversa(nome_conversa, mensagens):
@@ -31,6 +32,15 @@ def listar_conversas():
     conversas = list(PASTA_CONVERSAS.glob("*.pkl"))
     conversas = sorted(conversas, key=lambda x: x.stat().st_mtime, reverse=True)
     return [c.stem for c in conversas]
+
+def salvar_conversa_em_jsonl(mensagens):
+    # Verifica se há mensagens para salvar
+    if len(mensagens) == 0:
+        return False
+    # Abre o arquivo JSONL em modo de anexação (append)
+    with open(ARQUIVO_JSONL, "a", encoding="utf-8") as f:
+        json_line = json.dumps({"messages": mensagens}, ensure_ascii=False)
+        f.write(json_line + "\n")
 
 # Função principal para gerar a resposta do chatbot
 def gerar_resposta(cliente, messages):
@@ -79,14 +89,12 @@ def tab_conversas():
     if st.sidebar.button('➕ Nova conversa', use_container_width=True):
         st.session_state.mensagens = [{"role": "system", "content": st.session_state.prompt_sistema}]
         st.session_state.conversa_atual = ''
-        # Não chamamos st.experimental_rerun()
 
     conversas = listar_conversas()
     for nome_conversa in conversas:
         if st.sidebar.button(nome_conversa, key=nome_conversa, use_container_width=True):
             st.session_state.mensagens = carregar_conversa(nome_conversa)
             st.session_state.conversa_atual = nome_conversa
-            # Não chamamos st.experimental_rerun()
 
 # Página principal do chatbot
 def pagina_principal():
@@ -129,6 +137,11 @@ def pagina_principal():
         except Exception as e:
             st.error(f"Ocorreu um erro: {e}")
 
+    # Botão para salvar em JSONL
+    if st.button("Encerrar e salvar conversa"):
+        salvar_conversa_em_jsonl(st.session_state.mensagens)
+        st.success("Conversa salva no arquivo 'fine_tuning_data.jsonl'!")
+
 # Main
 def main():
     inicializacao()
@@ -138,5 +151,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
